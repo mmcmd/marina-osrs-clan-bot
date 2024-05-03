@@ -1,0 +1,17 @@
+{
+    "token": "bot token",
+    "homeserver_id": "homeserver ID",
+    "status": "doing the hard work",
+    "prefix": "!",
+    "WOM_key": "Wise Old Man group password",
+    "WOM_group": "Wise Old Man group ID",
+    "moderator_role_ids": ["ID of your admin/mod role(s)"],
+    "drops_channel_id": "drop channel ID",
+    "denied_drop_channel_id": "denied drops channel ID",
+    "log_channel": "log channel ID",
+    "clan_member_id": "ID of clan member role",
+    "max_amount_points_per_drop": "200",
+    "google_spreadsheet_id": "spreadsheet ID (on google spreadsheets)",
+    "google_service_account_json": "JSON (in Google Service Account folder) of your service account",
+    "google_sheet_worksheet_name": "Name of the sheet where drops are posted"
+}
