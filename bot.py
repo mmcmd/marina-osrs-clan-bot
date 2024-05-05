@@ -1,4 +1,3 @@
-#!/usr/bin/env py3
 import asyncio
 from typing import Optional
 from datetime import datetime, timedelta, date, timezone, time
@@ -28,6 +27,8 @@ token = config_json["token"]
 home_server_ID = int(config_json["homeserver_id"])
 
 status = str(config_json["status"])
+
+log_channel = int(config_json["log_channel"])
 
 prefix = config_json["prefix"]
 
@@ -83,22 +84,17 @@ class MyClient(discord.Client):
         await self.tree.sync(guild=home_server_ID)
 
 
-#def GoogleSheetExport:
-    # Code to export data to Google Sheets
-
-
 @bot.event
 async def on_ready():
     print('Logged in as {0.user}'.format(bot))
 
 # Use ServiceAccountCredentials to create gspread client
-gc = gspread.service_account(f"Google Service Account/{google_service_account_json}")
+gc = gspread.service_account(filename=f"Google Service Account/{google_service_account_json}")
 
-def ExportToGoogleSheets(rsn,
+def ExportToGoogleSheets(Discord_IDs,
                          name_of_drop,
                          screenshot_url,
                          points_given,
-                         discord_id,
                          Date_of_drop,
                          Discord_link_to_submission):
 
@@ -116,19 +112,44 @@ def ExportToGoogleSheets(rsn,
     """
 
     spreadsheet = gc.open_by_key(google_spreadsheet_id)
-    worksheet = spreadsheet.google_sheet_worksheet_name
+    worksheet = spreadsheet.worksheet(google_sheet_worksheet_name)
 
-    Export = [
-        rsn,
-        name_of_drop,
-        screenshot_url,
-        points_given,
-        discord_id,
-        Date_of_drop,
-        Discord_link_to_submission
-    ]
+    user_data_list = []
 
-    worksheet.append_rows(Export)
+    Discord_IDs = [int(ID) for ID in Discord_IDs] # Convert all IDs to ints
+
+    guild_object = bot.get_guild(home_server_ID)
+
+    # Loop through Discord IDs and create user data dictionaries
+    for Discord_ID in Discord_IDs:
+        discord_user_object = guild_object.get_member(Discord_ID)
+
+        user_data = {
+            "rsn": discord_user_object.display_name,
+            "name of drop": name_of_drop,
+            "screenshot": screenshot_url,
+            "points given": points_given,
+            "Discord ID": str(Discord_ID),
+            "Date of drop": Date_of_drop,
+            "Discord link": Discord_link_to_submission
+        }
+
+        user_data_list.append(user_data)
+
+    # Form a list with dictionaries for efficient data appending
+    values_to_append = []
+    for user_data in user_data_list:
+        values_to_append.append([
+            user_data["rsn"],
+            user_data["name of drop"],
+            user_data["screenshot"],
+            user_data["points given"],
+            user_data["Discord ID"],
+            user_data["Date of drop"],
+            user_data["Discord link"]
+        ])
+
+    worksheet.append_rows(values_to_append)
 
 def ConvertEmbedToData(posted_message : MessageType.default):
 
@@ -138,19 +159,57 @@ def ConvertEmbedToData(posted_message : MessageType.default):
 
     # Loop through each field and add it to the list
     for field in embed_fields:
-        if field["Discord IDs"]:
-            user_id_list = (field["Discord IDs"]).split(",")
+        if field.name == "Discord IDs":
+            user_id_list = (field.value.split(","))
             user_id_list = [user_id.strip() for user_id in user_id_list]
+            data["Discord IDs"] = user_id_list
         else:
             data[field.name] = field.value
 
+    data["screenshot_url"] = posted_message.embeds[0].image.url
+    data["Discord link"] = posted_message.jump_url
+
+    posted_message_date_object = posted_message.created_at
+    posted_message_ISO_format = posted_message_date_object.strftime("%Y-%m-%d")
+    
+    data["Date of drop"] = posted_message_ISO_format
+
     return data
 
-    #for clannie in data["Clannies"]
+async def edit_embed_and_update_field(message: discord.Message, field_name: str, field_value: str):
+    """
+    Edits an existing Discord message and updates a specific field in its embed (if any).
 
+    Args:
+        message: The Discord message object to be edited.
+        field_name: The name of the field to be updated.
+        field_value: The new value for the field.
+    """
 
+    if not message.embeds:  # Check if the message contains an embed
+        return  # Do nothing if there's no embed
 
+    # Get the existing embed from the message
+    embed = message.embeds[0]
 
+    # Find the field index (if it exists)
+    field_index = None
+    for i, field in enumerate(embed.fields):
+        if field.name == field_name:
+            field_index = i
+            break
+
+    # Update the field value if found
+    if field_index is not None:
+        embed.set_field_at(index=field_index,
+                           name=field_name,
+                           value=field_value)
+
+    # Edit the message with the updated embed
+    try:
+        await message.edit(embed=embed)
+    except discord.HTTPException as e:
+        print(f"Error editing message: {e}")
 
 
 
@@ -173,31 +232,65 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         return
 
 
-    guild = bot.get_guild(payload.guild_id)
     drops_channel = bot.get_channel(drops_channel_id) # #logs channel
+    logs_channel = bot.get_channel(log_channel)
 
 
     if payload.emoji.name == '✅':
         posted_drop = await drops_channel.fetch_message(payload.message_id)
         data = ConvertEmbedToData(posted_drop)
+        ExportToGoogleSheets(data["Discord IDs"],data["Drop name"],data["screenshot_url"],data["Points each"],data["Date of drop"],data["Discord link"])
         await posted_drop.clear_reactions()
-        await drops_channel.send(f"Drop approved by <@{payload.member.id}>")
 
+        # Edit status field to approved
+        await edit_embed_and_update_field(message=posted_drop,
+                                          field_name="Approval status",
+                                          field_value=f"✅ Approved by {payload.member.mention}")
 
-        
+        embed = discord.Embed(title=f"Drop approved by {payload.member.global_name}",
+                              color=0x008000,
+                              timestamp=datetime.now())
+        embed.description = (f"A drop has been approved by {payload.member.mention}.")
+        embed.add_field(name="Clanmates involved", value=data["Clannies"])
+        embed.add_field(name="Points each", value=data["Value"])
+        embed.add_field(name="Points each", value=data["Points each"])
+        embed.add_field(name="Name of drop", value=data["Drop name"])
+        embed.add_field(name="Link to submission", value=posted_drop.jump_url)
+        try:
+            if data["Notes"] is not None:
+                embed.add_field(name="Notes", value=data["Notes"])
+        except KeyError:
+            embed.add_field(name="Notes", value="User did not provide any notes")
 
-        #GoogleSheetExport
-
+        embed.set_image(url=data["screenshot_url"])
+        embed.set_footer(text=f"approved by {payload.member.global_name}",icon_url=payload.member.avatar.url)
+        embed.set_author(name=bot.user.display_name,icon_url=bot.user.avatar.url)
+        await logs_channel.send(embed=embed)
 
     if payload.emoji.name == '❌':
         posted_drop = await drops_channel.fetch_message(payload.message_id)
-        denied_drop_channel = await drops_channel.fetch_message(denied_drop_channel_id)
-        await denied_drop_channel.send(content=posted_drop.content, embed=posted_drop.embeds[0] if posted_drop.embeds else None)
+        denied_drop_channel = bot.get_channel(denied_drop_channel_id)
+        data = ConvertEmbedToData(posted_drop)
+        embed = discord.Embed(title=f"Drop denied by {payload.member.global_name}",
+                              color=0x008000,
+                              timestamp=datetime.now())
+        embed.description = (f"A drop has been denied by {payload.member.mention}.")
+        embed.add_field(name="Clanmates involved", value=data["Clannies"])
+        embed.add_field(name="Points each", value=data["Value"])
+        embed.add_field(name="Points each", value=data["Points each"])
+        embed.add_field(name="Name of drop", value=data["Drop name"])
+        embed.add_field(name="Approval status", value=f"Denied by {payload.member.mention}")
+        try:
+            if data["Notes"] is not None:
+                embed.add_field(name="Notes", value=data["Notes"])
+        except KeyError:
+            embed.add_field(name="Notes", value="User did not provide any notes")
+        embed.set_image(url=data["screenshot_url"])
+        embed.set_footer(text=f"denied by {payload.member.global_name}",icon_url=payload.member.avatar.url)
+        embed.set_author(name=bot.user.display_name,icon_url=bot.user.avatar.url)
+        await logs_channel.send(embed=embed)
+        await denied_drop_channel.send(embed=embed)
         await posted_drop.delete()
-
-
-
-
 
 
 # The rename decorator allows us to change the display of the parameter on Discord.
@@ -243,7 +336,7 @@ async def submit_drop(interaction: discord.Interaction,
         await interaction.response.send_message("Invalid number of non-clanmates. Please provide a non-negative number.")
         return
 
-    # Validate that non_clanmates is a whole non-negative number
+    # Validate that drop_value is a whole non-negative number
     if not isinstance(drop_value, int) or drop_value < 0:
         await interaction.response.send_message("Invalid drop value. Please provide a non-negative number.")
         return
@@ -289,9 +382,12 @@ async def submit_drop(interaction: discord.Interaction,
     author_object = interaction.guild.get_member(interaction.user.id)
     nicknames_string =  ', '.join(nicknames)
 
+    embed = discord.Embed(title=f"{author_object.nick} drop submission", color=0x00ffff,timestamp=datetime.now())
+    embed.set_footer(text=f"submitted by {interaction.user.display_name}",icon_url=interaction.user.avatar.url)
+    embed.set_author(name=bot.user.name, icon_url=bot.user.avatar.url)
+
     if len(mentioned_users_objects) == 1:
         # Build the embed message
-        embed = discord.Embed(title=f"{author_object.nick} drop submission", color=0x00ffff)
         embed.add_field(name='Value', value=f'{drop_value}')
         embed.add_field(name='Clannies', value=f'{nicknames_string}')
         embed.add_field(name='Drop name', value=f'{drop_name}')
@@ -301,7 +397,6 @@ async def submit_drop(interaction: discord.Interaction,
         embed.add_field(name='Discord IDs', value=', '.join(mentioned_users_ids))
 
     elif len(mentioned_users_objects) > 1:
-        embed = discord.Embed(title=f"{author_object.nick} drop submission", color=0x00ffff)
         embed.add_field(name='Value', value=f'{drop_value}')
         embed.add_field(name='Clannies', value=f'{nicknames_string}')
         embed.add_field(name='Drop name', value=f'{drop_name}')
@@ -311,6 +406,7 @@ async def submit_drop(interaction: discord.Interaction,
             embed.add_field(name='Notes', value=f'{note}')
         embed.add_field(name='Discord IDs', value=', '.join(mentioned_users_ids))
 
+    embed.add_field(name="Approval status", value=f'⏳ Waiting for staff approval ⏳')
 
 
 
@@ -324,9 +420,7 @@ async def submit_drop(interaction: discord.Interaction,
     posted_drop_message = await drops_channel.send(embed=embed)
     await posted_drop_message.add_reaction('✅')
     await posted_drop_message.add_reaction('❌')
-    await interaction.response.send_message(f"Successfully posted drop! Please wait for a staff member to approve it. View your drop here: https://discord.com/channels/1116473389817802884/1234688342935732235/{posted_drop_message.id}")
-
-
+    await interaction.response.send_message(f"Your drop has been submitted successfully! Please wait for a staff member to approve it. View your drop here: {posted_drop_message.jump_url}")
 
 
 @bot.tree.command(name="create_competition")
