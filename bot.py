@@ -39,6 +39,9 @@ WOM_group = int(config_json["WOM_group"])
 moderator_role_IDs = config_json["moderator_role_ids"]
 moderator_role_IDs = [int(m) for m in moderator_role_IDs] # Making sure they are ints
 
+event_staff_IDs = config_json["event_staff_id"]
+event_staff_IDs = [int(m) for m in event_staff_IDs] # Making sure they are ints
+
 drops_channel_id = int(config_json["drops_channel_id"])
 
 denied_drop_channel_id = int(config_json["denied_drop_channel_id"])
@@ -211,6 +214,14 @@ async def edit_embed_and_update_field(message: discord.Message, field_name: str,
     except discord.HTTPException as e:
         print(f"Error editing message: {e}")
 
+def RemoveTrailingZerosFromFloat(number: float):
+    # Remove trailing 0 if it exists
+    if float(number) == int(number):
+        return int(number)
+    else:
+        return float(number)
+
+
 
 
 @bot.event
@@ -230,6 +241,11 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
 
     if payload.member.top_role.id not in moderator_role_IDs: # Ignores reaction if not a moderator role
         return
+
+
+    # The following is unreleased, will work with discord.py 2.4
+    # if payload.message_author_id != bot.user.id: # Ignore reaction if the reaction is not to a message from the bot 
+    #    return
 
 
     drops_channel = bot.get_channel(drops_channel_id) # #logs channel
@@ -271,6 +287,10 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         posted_drop = await drops_channel.fetch_message(payload.message_id)
         denied_drop_channel = bot.get_channel(denied_drop_channel_id)
         data = ConvertEmbedToData(posted_drop)
+        await edit_embed_and_update_field(message=posted_drop,
+                                            field_name="Approval status",
+                                            field_value=f"❌ Denied by {payload.member.mention}")
+
         embed = discord.Embed(title=f"Drop denied by {payload.member.global_name}",
                               color=0x008000,
                               timestamp=datetime.now())
@@ -290,29 +310,21 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         embed.set_author(name=bot.user.display_name,icon_url=bot.user.avatar.url)
         await logs_channel.send(embed=embed)
         await denied_drop_channel.send(embed=embed)
-        await posted_drop.delete()
+        await posted_drop.clear_reactions()
 
 
-# The rename decorator allows us to change the display of the parameter on Discord.
-# In this example, even though we use `text_to_send` in the code, the client will use `text` instead.
-# Note that other decorators will still refer to it as `text_to_send` in the code.
-@bot.tree.command()
-@app_commands.rename(text_to_send='text')
-@app_commands.describe(text_to_send='Text to send in the current channel')
-async def send(interaction: discord.Interaction, text_to_send: str):
-    """Sends the text into the current channel."""
-    await interaction.response.send_message(text_to_send)
 
-@bot.tree.command()
+@bot.tree.command(name="submit_drop")
 @commands.has_any_role(*[clan_member_id])
 async def submit_drop(interaction: discord.Interaction,
                        username: str,
                        drop_name: str,
-                       drop_value: int,
+                       drop_value: float,
                        screenshot: Optional[discord.Attachment] = None,
                        screenshot_url: Optional[str] = None,
                        non_clanmates: int = 0,
-                       note: Optional[str] = ""):
+                       note: Optional[str] = "",
+                       static_points: Optional[float] = None):
     """
     This function handles the submit-drop slash command.
 
@@ -320,15 +332,33 @@ async def submit_drop(interaction: discord.Interaction,
         interaction (discord.Interaction): The interaction object representing the command invocation.
         username (str): The username of the player who got the drop.
         drop_name (str): The name of the dropped item.
-        drop_value: (int) The estimated value of the drop.
+        drop_value: (float) The estimated value of the drop.
         screenshot (discord.Attachment, optional): An attached screenshot of the drop (mutually exclusive with screenshot_url). Defaults to None.
         screenshot_url (str, optional): A URL to a screenshot of the drop (mutually exclusive with screenshot). Defaults to None.
         non_clanmates (int, optional): The number of non-clanmates present during the drop. Defaults to 0.
+        note (str, optional): An optional note to attach to the posted drop
+        static_points (float, optional): For use by staff only. This is to grant a static amount of points to everyone (for example for events)
     """
 
     # Input validation (ensure only one screenshot option is provided)
     if screenshot and screenshot_url:
         await interaction.response.send_message("Please provide only one screenshot option (attachment OR URL, not both)")
+        return
+    
+    if static_points is not None:
+        has_valid_role = any(role.id in moderator_role_IDs or role.id in event_staff_IDs for role in interaction.user.roles)
+        if not has_valid_role:
+            await interaction.response.send_message("Invalid submission. The static_points parameter is reserved only for staff. It is to grant a static amount of points for events and such.")
+            return
+        # Validate that static_value is a whole non-negative number
+        if not isinstance(static_points, float) or static_points < 0:
+            await interaction.response.send_message("Invalid static point value. Please provide a non-negative number.")
+            return
+        static_points = RemoveTrailingZerosFromFloat(static_points)
+
+
+    if drop_value < 1:
+        await interaction.response.send_message("The minimum drop value is 1m")
         return
     
     # Validate that non_clanmates is a whole non-negative number
@@ -337,9 +367,13 @@ async def submit_drop(interaction: discord.Interaction,
         return
 
     # Validate that drop_value is a whole non-negative number
-    if not isinstance(drop_value, int) or drop_value < 0:
+    if not isinstance(drop_value, float) or drop_value < 0:
         await interaction.response.send_message("Invalid drop value. Please provide a non-negative number.")
         return
+    
+    # Remove trailing 0 if it exists
+    drop_value = RemoveTrailingZerosFromFloat(drop_value)
+
 
 
     # Check for mentions and usernames
@@ -364,25 +398,27 @@ async def submit_drop(interaction: discord.Interaction,
         await interaction.response.send_message("Please provide mentioned usernames only.")
         return
 
-    if non_clanmates >= 1:
-        drop_value = round(drop_value,1)
-        points_each = round((drop_value / (len(mentioned_users_objects) + non_clanmates)),1)
-        if points_each > max_amount_points_per_drop:
-            points_each = max_amount_points_per_drop
-    elif non_clanmates == 0:
-        drop_value = round(drop_value,1)
-        points_each = round((drop_value / len(mentioned_users_objects)),1)
-        if points_each > max_amount_points_per_drop:
-            points_each = max_amount_points_per_drop # Caps points per drop to max amount of points 
+    if static_points is None:
+        if non_clanmates >= 1:
+            drop_value = round(drop_value,1)
+            points_each = round((drop_value / (len(mentioned_users_objects) + non_clanmates)),1)
+            if points_each > max_amount_points_per_drop:
+                points_each = max_amount_points_per_drop
+        elif non_clanmates == 0:
+            drop_value = round(drop_value,1)
+            points_each = round((drop_value / len(mentioned_users_objects)),1)
+            if points_each > max_amount_points_per_drop:
+                points_each = max_amount_points_per_drop # Caps points per drop to max amount of points 
+        else:
+            await interaction.response.send_message("Unspecified error occured with non_clanmates variable. Please contact your administrator.")
+            return
     else:
-        await interaction.response.send_message("Unspecified error occured with non_clanmates variable. Please contact your administrator.")
-        return
+        points_each = round(static_points, 1)
 
 
-    author_object = interaction.guild.get_member(interaction.user.id)
     nicknames_string =  ', '.join(nicknames)
 
-    embed = discord.Embed(title=f"{author_object.nick} drop submission", color=0x00ffff,timestamp=datetime.now())
+    embed = discord.Embed(title=f"{interaction.user.display_name} drop submission", color=0x00ffff,timestamp=datetime.now())
     embed.set_footer(text=f"submitted by {interaction.user.display_name}",icon_url=interaction.user.avatar.url)
     embed.set_author(name=bot.user.name, icon_url=bot.user.avatar.url)
 
@@ -465,7 +501,7 @@ async def create_competition(interaction: discord.Interaction,
 
         # Convert datetime to Eastern time readable format
         formatted_start_date = start_date_datetime.strftime("%Y-%m-%d %H:%M")
-        formatted_end_date = start_date_datetime.strftime("%Y-%m-%d %H:%M")
+        formatted_end_date = end_date_datetime.strftime("%Y-%m-%d %H:%M")
     except ValueError:
         await interaction.response.send_message("Invalid date format. Please use YYYY-MM-DD format.", ephemeral=True)
         return
@@ -498,7 +534,13 @@ async def create_competition(interaction: discord.Interaction,
         data = response.json()
         competition_id = data["competition"]["id"]
 
-        embed = discord.Embed(title=f"Competition under Marina created ✅", description=f"Name of the competition: {competition_name}\n Skill/Boss: {metric} \n Start date: {formatted_start_date} ET \n End date: {formatted_end_date} ET \n Link to the competition: https://wiseoldman.net/competitions/{competition_id}", color=0x00ffff)
+        embed = discord.Embed(title=f"Competition under Marina created ✅", description=f"Name of the competition: {competition_name}", color=0x00ffff)
+        embed.add_field(name='Skill/boss', value=f'{metric}')
+        embed.add_field(name='Start date', value=f'{formatted_start_date}')
+        embed.add_field(name='End date', value=f'{formatted_end_date}')
+        embed.add_field(name='Competition link', value=f'https://wiseoldman.net/competitions/{competition_id}')
+        embed.set_footer(text=f"queried by {interaction.user.display_name}",icon_url=interaction.user.avatar.url)
+        embed.set_author(name=bot.user.name, icon_url=bot.user.avatar.url)
 
 
         await interaction.response.send_message(embed=embed)
@@ -506,7 +548,7 @@ async def create_competition(interaction: discord.Interaction,
         await interaction.response.send_message(f"Error creating competition: {response.status_code} - {response.text}")
 
 # Bot commands
-@bot.command()
+@bot.command(name='sync')
 @commands.guild_only()
 @commands.is_owner()
 async def sync(
@@ -543,9 +585,3 @@ async def sync(
 
 
 bot.run(token)
-
-# https://gist.github.com/AbstractUmbra/a9c188797ae194e592efe05fa129c57f
-
-
-
-
