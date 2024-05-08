@@ -5,7 +5,8 @@
     "prefix": "!",
     "WOM_key": "Wise Old Man group password",
     "WOM_group": "Wise Old Man group ID",
-    "moderator_role_ids": ["ID of your admin/mod role(s)"],
+    "moderator_role_ids": ["ID of your admin/mod role(s)"],,
+    "event_staff_id": "ID of event staff role"
     "drops_channel_id": "drop channel ID",
     "denied_drop_channel_id": "denied drops channel ID",
     "log_channel": "log channel ID",
