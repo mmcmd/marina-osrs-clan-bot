@@ -44,8 +44,6 @@ event_staff_IDs = [int(m) for m in event_staff_IDs] # Making sure they are ints
 
 drops_channel_id = int(config_json["drops_channel_id"])
 
-denied_drop_channel_id = int(config_json["denied_drop_channel_id"])
-
 clan_member_id = int(config_json["clan_member_id"]) # ID of the clan member role
 
 max_amount_points_per_drop = int(config_json["max_amount_points_per_drop"])
@@ -131,7 +129,7 @@ def ExportToGoogleSheets(Discord_IDs,
             "rsn": discord_user_object.display_name,
             "name of drop": name_of_drop,
             "screenshot": screenshot_url,
-            "points given": points_given,
+            "points given": float(points_given),
             "Discord ID": str(Discord_ID),
             "Date of drop": Date_of_drop,
             "Discord link": Discord_link_to_submission
@@ -285,7 +283,6 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
 
     if payload.emoji.name == '❌':
         posted_drop = await drops_channel.fetch_message(payload.message_id)
-        denied_drop_channel = bot.get_channel(denied_drop_channel_id)
         data = ConvertEmbedToData(posted_drop)
         await edit_embed_and_update_field(message=posted_drop,
                                             field_name="Approval status",
@@ -309,7 +306,6 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         embed.set_footer(text=f"denied by {payload.member.global_name}",icon_url=payload.member.avatar.url)
         embed.set_author(name=bot.user.display_name,icon_url=bot.user.avatar.url)
         await logs_channel.send(embed=embed)
-        await denied_drop_channel.send(embed=embed)
         await posted_drop.clear_reactions()
 
 
@@ -326,18 +322,18 @@ async def submit_drop(interaction: discord.Interaction,
                        note: Optional[str] = "",
                        static_points: Optional[float] = None):
     """
-    This function handles the submit-drop slash command.
+    Submit your drop to Marina using this command.
 
     Args:
         interaction (discord.Interaction): The interaction object representing the command invocation.
-        username (str): The username of the player who got the drop.
+        username (str): The username of the player(s) who got the drop. You must @ them, simply typing their usernames will not work
         drop_name (str): The name of the dropped item.
-        drop_value: (float) The estimated value of the drop.
-        screenshot (discord.Attachment, optional): An attached screenshot of the drop (mutually exclusive with screenshot_url). Defaults to None.
-        screenshot_url (str, optional): A URL to a screenshot of the drop (mutually exclusive with screenshot). Defaults to None.
-        non_clanmates (int, optional): The number of non-clanmates present during the drop. Defaults to 0.
+        drop_value: (float) The estimated value of the drop. Just put the number, for example 6. Decimals work as well using dots (7.5)
+        screenshot (discord.Attachment, optional): An attached screenshot of the drop. Use either this parameter OR screenshot_url. You cannot feed both parameters 
+        screenshot_url (str, optional): A URL to a screenshot of the drop. Use either this parameter OR screenshot_url. You cannot feed both parameters 
+        non_clanmates (int, optional): The number of non-clanmates present during the drop. Defaults to 0, so there is no need to specify it if there are none.
         note (str, optional): An optional note to attach to the posted drop
-        static_points (float, optional): For use by staff only. This is to grant a static amount of points to everyone (for example for events)
+        static_points (float, optional): For use by staff and event staff only. This is to grant a static amount of points to everyone (for example for events)
     """
 
     # Input validation (ensure only one screenshot option is provided)

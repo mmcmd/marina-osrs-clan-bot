@@ -2,3 +2,4 @@
 Google Service Account/*.json
 Marina/*
 !metrics.json
+!levels.json
