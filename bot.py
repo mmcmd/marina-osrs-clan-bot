@@ -12,7 +12,7 @@ import requests
 from discord import *
 import gspread
 from google.oauth2.service_account import Credentials
-
+import re
 
 with open("config.json", "r") as read: # Imports config json file
     config_json = json.load(read)
@@ -219,7 +219,17 @@ def RemoveTrailingZerosFromFloat(number: float):
     else:
         return float(number)
 
+def extract_user_ids(username):
+    """Extracts user IDs from a string containing mentions.
 
+    Args:
+        username: The string containing user mentions.
+
+    Returns:
+        A list of extracted user IDs as strings.
+    """
+    matches = re.findall(r"<@(\d+)>", username)  # Use regex to find user mentions
+    return matches
 
 
 @bot.event
@@ -376,17 +386,23 @@ async def submit_drop(interaction: discord.Interaction,
     mentioned_users_objects = []
     mentioned_users_ids = []
     nicknames = []
-    for word in username.split():
-        if word.startswith("<@"):
-            try:
-                user_id = int(word[2:-1])
-                mentioned_user = interaction.guild.get_member(user_id)
-                if mentioned_user:
-                    mentioned_users_objects.append(mentioned_user)
-                    mentioned_users_ids.append(str(mentioned_user.id))
-                    nicknames.append(mentioned_user.nick if mentioned_user.nick else mentioned_user.name)  # Add nickname or username
-            except (ValueError, discord.HTTPException):
-                pass
+
+    users_mentioned_ids = extract_user_ids(username)
+    users_mentioned_ids = [int(m) for m in users_mentioned_ids] # Making sure they are ints
+    users_mentioned_ids = set(users_mentioned_ids) # Remove duplicate mentions
+
+
+    for user_id in users_mentioned_ids:
+        try:
+            mentioned_user = interaction.guild.get_member(user_id)
+            if mentioned_user:
+                mentioned_users_objects.append(mentioned_user)
+                mentioned_users_ids.append(str(mentioned_user.id))
+                nicknames.append(mentioned_user.display_name)  # Add nickname or username
+        except (ValueError, discord.HTTPException):
+            pass
+
+    
 
 
     # Check if any usernames or mentions were found
@@ -411,6 +427,8 @@ async def submit_drop(interaction: discord.Interaction,
     else:
         points_each = round(static_points, 1)
 
+    # Remove trailing 0 if there is one
+    points_each = RemoveTrailingZerosFromFloat(points_each)
 
     nicknames_string =  ', '.join(nicknames)
 

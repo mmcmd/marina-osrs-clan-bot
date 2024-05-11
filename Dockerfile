@@ -1,14 +1,23 @@
-# Use the latest stable Python image (can be specific if needed)
-FROM python:latest
+# For more information, please refer to https://aka.ms/vscode-docker-python
+FROM python:3.12-alpine3.19
 
-# Set the working directory within the container
+# Keeps Python from generating .pyc files in the container
+ENV PYTHONDONTWRITEBYTECODE=1
+
+# Turns off buffering for easier container logging
+ENV PYTHONUNBUFFERED=1
+
+# Install pip requirements
+COPY requirements.txt .
+RUN python -m pip install -r requirements.txt
+
 WORKDIR /app
+COPY . /app
 
-# Copy the current directory (context) and its contents to the container's /app directory
-COPY . .
+# Creates a non-root user with an explicit UID and adds permission to access the /app folder
+# For more info, please refer to https://aka.ms/vscode-docker-python-configure-containers
+RUN adduser -u 5678 --disabled-password --gecos "" appuser && chown -R appuser /app
+USER appuser
 
-# Install pip packages listed in a requirements.txt file (optional)
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Run the bot.py script using the latest stable Python version
+# During debugging, this entry point will be overridden. For more information, please refer to https://aka.ms/vscode-docker-python-debug
 CMD ["python", "bot.py"]
