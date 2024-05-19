@@ -26,3 +26,4 @@ rsa==4.9
 StrEnum==0.4.15
 urllib3==2.2.1
 yarl==1.9.4
+fastapi-responses==0.2.1

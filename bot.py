@@ -1,5 +1,6 @@
 import asyncio
 from typing import Optional
+import typing
 from datetime import datetime, timedelta, date, timezone, time
 import discord
 import json
@@ -13,6 +14,8 @@ from discord import *
 import gspread
 from google.oauth2.service_account import Credentials
 import re
+import enum
+from fastapi.responses import Response
 
 with open("config.json", "r") as read: # Imports config json file
     config_json = json.load(read)
@@ -231,6 +234,32 @@ def extract_user_ids(username):
     matches = re.findall(r"<@(\d+)>", username)  # Use regex to find user mentions
     return matches
 
+def format_datetime_for_discord(dt: datetime) -> str:
+    """Formats a datetime object for Discord timestamp display.
+
+    Args:
+        dt: The datetime object to format.
+
+    Returns:
+        A string representing the datetime in Discord timestamp format.
+    """
+    timestamp = int(dt.timestamp())
+    return f"<t:{timestamp}:F> (<t:{timestamp}:R>)"
+
+class JSONResponse(Response): # Create custom JSONResponse class
+    media_type = "application/json" # Set media type to application/json
+
+    def render(self, content: typing.Any) -> bytes:
+        # You can do custom stuff in the json.dumps.
+        return json.dumps(
+            content,
+            ensure_ascii=False,
+            allow_nan=False,
+            indent=4,
+            separators=(", ", ": "),
+        ).encode("utf-8")
+
+
 
 @bot.event
 async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
@@ -287,7 +316,10 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
             embed.add_field(name="Notes", value="User did not provide any notes")
 
         embed.set_image(url=data["screenshot_url"])
-        embed.set_footer(text=f"approved by {payload.member.global_name}",icon_url=payload.member.avatar.url)
+        embed.set_footer(text=f"approved by {payload.member.global_name}")
+        if payload.member.avatar is not None:
+            embed.set_footer(icon_url=payload.member.avatar.url)
+
         embed.set_author(name=bot.user.display_name,icon_url=bot.user.avatar.url)
         await logs_channel.send(embed=embed)
 
@@ -313,7 +345,10 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         except KeyError:
             embed.add_field(name="Notes", value="User did not provide any notes")
         embed.set_image(url=data["screenshot_url"])
-        embed.set_footer(text=f"denied by {payload.member.global_name}",icon_url=payload.member.avatar.url)
+        embed.set_footer(text=f"denied by {payload.member.global_name}")
+        if payload.member.avatar is not None:
+            embed.set_footer(icon_url=payload.member.avatar.url)
+
         embed.set_author(name=bot.user.display_name,icon_url=bot.user.avatar.url)
         await logs_channel.send(embed=embed)
         await posted_drop.clear_reactions()
@@ -433,7 +468,9 @@ async def submit_drop(interaction: discord.Interaction,
     nicknames_string =  ', '.join(nicknames)
 
     embed = discord.Embed(title=f"{interaction.user.display_name} drop submission", color=0x00ffff,timestamp=datetime.now())
-    embed.set_footer(text=f"submitted by {interaction.user.display_name}",icon_url=interaction.user.avatar.url)
+    embed.set_footer(text=f"submitted by {interaction.user.display_name}")
+    if interaction.user.avatar is not None:
+        embed.set_footer(icon_url=interaction.user.avatar.url)
     embed.set_author(name=bot.user.name, icon_url=bot.user.avatar.url)
 
     if len(mentioned_users_objects) == 1:
@@ -482,7 +519,7 @@ async def create_competition(interaction: discord.Interaction,
                                   metric: str,
                                   duration: Optional[int] = 7):
     """
-    This function handles the create_competition slash command.
+    Reserved for admin use only. Creates a competition in Wise Old Man
 
     Args:
         interaction (discord.Interaction): The interaction object representing the command invocation.
@@ -513,9 +550,9 @@ async def create_competition(interaction: discord.Interaction,
         start_date_str = start_date_datetime.isoformat()
         end_date_str = end_date_datetime.isoformat()
 
-        # Convert datetime to Eastern time readable format
-        formatted_start_date = start_date_datetime.strftime("%Y-%m-%d %H:%M")
-        formatted_end_date = end_date_datetime.strftime("%Y-%m-%d %H:%M")
+        # Convert datetime to Discord timestamp format
+        formatted_start_date = format_datetime_for_discord(start_date_datetime)
+        formatted_end_date = format_datetime_for_discord(end_date_datetime)
     except ValueError:
         await interaction.response.send_message("Invalid date format. Please use YYYY-MM-DD format.", ephemeral=True)
         return
@@ -553,13 +590,63 @@ async def create_competition(interaction: discord.Interaction,
         embed.add_field(name='Start date', value=f'{formatted_start_date}')
         embed.add_field(name='End date', value=f'{formatted_end_date}')
         embed.add_field(name='Competition link', value=f'https://wiseoldman.net/competitions/{competition_id}')
-        embed.set_footer(text=f"queried by {interaction.user.display_name}",icon_url=interaction.user.avatar.url)
+        embed.set_footer(text=f"queried by {interaction.user.display_name}")
+        if interaction.user.avatar is not None:
+            embed.set_footer(icon_url=interaction.user.avatar.url)
+
         embed.set_author(name=bot.user.name, icon_url=bot.user.avatar.url)
 
 
         await interaction.response.send_message(embed=embed)
     else:
         await interaction.response.send_message(f"Error creating competition: {response.status_code} - {response.text}")
+
+@create_competition.autocomplete('metric')
+async def metric_autocomplete(
+    interaction: discord.Interaction,
+    current: str,
+) -> list[app_commands.Choice[str]]:
+    
+
+    filtered_metric = [metric for metric in metrics_list if current.lower() in metric.lower()]
+
+    return [
+        app_commands.Choice(name=metric, value=metric)
+        for metric in filtered_metric
+    ]
+
+
+@bot.tree.command(name='export_members')
+@commands.guild_only()
+@commands.has_any_role(*moderator_role_IDs)
+async def export_members(ctx: discord.Interaction):
+    """
+    Reserved for admin use only. Returns a list of all members and their discord ID in JSON format
+
+    Args:
+        interaction (discord.Interaction): The interaction object representing the command invocation.
+    """
+
+    guild = bot.get_guild(home_server_ID)
+
+    member_role_object = guild.get_role(clan_member_id)
+
+    members_with_role = [member for member in guild.members if member_role_object in member.roles]
+
+    # Prepare data for JSON export
+    member_data = []
+    for member in members_with_role:
+        member_data.append({
+        "id": member.id,
+        "name": member.display_name
+        })
+
+    json_data = JSONResponse(content=member_data)
+
+    # Send the response with formatted JSON data
+    await ctx.response.send_message(embed=json_data)  # Pass json_data.content to render
+
+
 
 # Bot commands
 @bot.command(name='sync')
