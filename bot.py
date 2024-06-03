@@ -470,7 +470,7 @@ async def submit_drop(interaction: discord.Interaction,
     embed = discord.Embed(title=f"{interaction.user.display_name} drop submission", color=0x00ffff,timestamp=datetime.now())
     embed.set_footer(text=f"submitted by {interaction.user.display_name}")
     if interaction.user.avatar is not None:
-        embed.set_footer(icon_url=interaction.user.avatar.url)
+        embed.set_footer(text=f"submitted by {interaction.user.display_name}",icon_url=interaction.user.avatar.url)
     embed.set_author(name=bot.user.name, icon_url=bot.user.avatar.url)
 
     if len(mentioned_users_objects) == 1:
@@ -592,7 +592,7 @@ async def create_competition(interaction: discord.Interaction,
         embed.add_field(name='Competition link', value=f'https://wiseoldman.net/competitions/{competition_id}')
         embed.set_footer(text=f"queried by {interaction.user.display_name}")
         if interaction.user.avatar is not None:
-            embed.set_footer(icon_url=interaction.user.avatar.url)
+            embed.set_footer(text=f"queried by {interaction.user.display_name}",icon_url=interaction.user.avatar.url)
 
         embed.set_author(name=bot.user.name, icon_url=bot.user.avatar.url)
 
